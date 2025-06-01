@@ -9,11 +9,15 @@
 
 //! Types and helpers to parse the input of the derive macro.
 
+use std::path::{Path, PathBuf};
+
 use syn::{Attribute, DeriveInput, Expr, ExprLit, Generics, Ident, Lit, Meta};
+
+use crate::attributes::{GrammarDataSource, GrammarSourceEmitter};
 
 #[derive(Debug, PartialEq)]
 pub(crate) enum GrammarSource {
-    File(String),
+    File(PathBuf),
     Inline(String),
 }
 
@@ -45,9 +49,7 @@ pub(crate) fn parse_derive(ast: DeriveInput) -> (ParsedDerive, Vec<GrammarSource
     }
 
     let mut grammar_sources = Vec::with_capacity(grammar.len());
-    for attr in grammar {
-        grammar_sources.push(get_attribute(attr))
-    }
+    parse_attributes(grammar, &mut grammar_sources);
 
     let non_exhaustive = ast
         .attrs
@@ -63,28 +65,44 @@ pub(crate) fn parse_derive(ast: DeriveInput) -> (ParsedDerive, Vec<GrammarSource
         grammar_sources,
     )
 }
-
-fn get_attribute(attr: &Attribute) -> GrammarSource {
-    match &attr.meta {
-        Meta::NameValue(name_value) => match &name_value.value {
-            Expr::Lit(ExprLit {
-                lit: Lit::Str(string),
-                ..
-            }) => {
-                if name_value.path.is_ident("grammar") {
-                    GrammarSource::File(string.value())
-                } else {
-                    GrammarSource::Inline(string.value())
+fn parse_attributes(attrs: Vec<&Attribute>, output: &mut Vec<GrammarSource>) {
+    for attr in attrs {
+        match &attr.meta {
+            Meta::List(meta) => {
+                if meta.path.is_ident("grammar") {
+                    let source = meta.parse_args::<GrammarSourceEmitter>().unwrap();
+                    source
+                        .emit(&mut |node| {
+                            output.push(node.source);
+                            Ok(())
+                        })
+                        .unwrap();
                 }
             }
-            _ => panic!("grammar attribute must be a string"),
-        },
-        _ => panic!("grammar attribute must be of the form `grammar = \"...\"`"),
+            Meta::NameValue(meta) => match &meta.value {
+                Expr::Lit(ExprLit {
+                    lit: Lit::Str(string),
+                    ..
+                }) => {
+                    if meta.path.is_ident("grammar") {
+                        output.push(GrammarSource::File(
+                            Path::new(&string.value()).to_path_buf(),
+                        ));
+                    } else {
+                        output.push(GrammarSource::Inline(string.value()))
+                    }
+                }
+                _ => panic!("grammar attribute must be a string"),
+            },
+            _ => {}
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
+
     use super::parse_derive;
     use super::GrammarSource;
 
@@ -109,7 +127,10 @@ mod tests {
         ";
         let ast = syn::parse_str(definition).unwrap();
         let (parsed_derive, filenames) = parse_derive(ast);
-        assert_eq!(filenames, [GrammarSource::File("myfile.pest".to_string())]);
+        assert_eq!(
+            filenames,
+            [GrammarSource::File(Path::new("myfile.pest").to_path_buf())]
+        );
         assert!(!parsed_derive.non_exhaustive);
     }
 
@@ -126,8 +147,8 @@ mod tests {
         assert_eq!(
             filenames,
             [
-                GrammarSource::File("myfile1.pest".to_string()),
-                GrammarSource::File("myfile2.pest".to_string())
+                GrammarSource::File(Path::new("myfile1.pest").to_path_buf()),
+                GrammarSource::File(Path::new("myfile2.pest").to_path_buf())
             ]
         );
     }
@@ -141,7 +162,10 @@ mod tests {
         ";
         let ast = syn::parse_str(definition).unwrap();
         let (parsed_derive, filenames) = parse_derive(ast);
-        assert_eq!(filenames, [GrammarSource::File("myfile.pest".to_string())]);
+        assert_eq!(
+            filenames,
+            [GrammarSource::File(Path::new("myfile.pest").to_path_buf())]
+        );
         assert!(parsed_derive.non_exhaustive);
     }
 

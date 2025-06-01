@@ -48,6 +48,11 @@ pub mod parse_derive;
 #[cfg(not(feature = "export-internal"))]
 mod parse_derive;
 
+#[cfg(feature = "export-internal")]
+pub mod attributes;
+#[cfg(not(feature = "export-internal"))]
+pub(crate) mod attributes;
+
 use crate::parse_derive::{parse_derive, GrammarSource};
 use pest_meta::parser::{self, rename_meta_rule, Rule};
 use pest_meta::{optimizer, unwrap_or_report, validator};
