@@ -27,6 +27,7 @@ use std::io::{self, Read};
 use std::path::Path;
 
 use generator::generate;
+use parse_derive::GrammarInfo;
 use proc_macro2::TokenStream;
 use syn::DeriveInput;
 
@@ -62,13 +63,13 @@ use pest_meta::{optimizer, unwrap_or_report, validator};
 /// "include_str" statement (done in pest_derive, but turned off in the local bootstrap).
 pub fn derive_parser(input: TokenStream, include_grammar: bool) -> TokenStream {
     let ast: DeriveInput = syn::parse2(input).unwrap();
-    let (parsed_derive, contents) = parse_derive(ast);
-
+    let (parsed_derive, info) = parse_derive(ast);
+    let GrammarInfo { sources, routes } = info;
     // Grammar presented in a view of a string.
     let mut data = String::new();
     let mut paths = vec![];
 
-    for content in contents {
+    for content in sources {
         let (_data, _path) = match content {
             GrammarSource::File(ref path) => {
                 let root = env::var("CARGO_MANIFEST_DIR").unwrap_or_else(|_| ".".into());
@@ -96,12 +97,14 @@ pub fn derive_parser(input: TokenStream, include_grammar: bool) -> TokenStream {
                     Ok(data) => data,
                     Err(error) => panic!("error opening {:?}: {}", file_name, error),
                 };
-                (data, Some(path.clone()))
+                (Some(data), Some(path.clone()))
             }
-            GrammarSource::Inline(content) => (content, None),
+            GrammarSource::Inline(content) => (Some(content), None),
+            _ => (None, None),
         };
-
-        data.push_str(&_data);
+        if let Some(value) = _data {
+            data.push_str(&value);
+        }
         if let Some(path) = _path {
             paths.push(path);
         }
@@ -125,6 +128,7 @@ pub fn derive_parser(input: TokenStream, include_grammar: bool) -> TokenStream {
         defaults,
         &doc_comment,
         include_grammar,
+        &routes,
     )
 }
 

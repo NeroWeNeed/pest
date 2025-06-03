@@ -11,6 +11,7 @@
 
 use std::path::PathBuf;
 
+use proc_macro2::Span;
 use proc_macro2::TokenStream;
 use quote::{ToTokens, TokenStreamExt};
 use syn::{self, Ident};
@@ -32,6 +33,7 @@ pub fn generate(
     defaults: Vec<&str>,
     doc_comment: &DocComment,
     include_grammar: bool,
+    serialized_routes: &[(String, Vec<String>)],
 ) -> TokenStream {
     let uses_eoi = defaults.iter().any(|name| *name == "EOI");
     let name = parsed_derive.name;
@@ -41,6 +43,7 @@ pub fn generate(
     } else {
         quote!()
     };
+    let route_macros = generate_route_macros(serialized_routes);
     let rule_enum = generate_enum(&rules, doc_comment, uses_eoi, parsed_derive.non_exhaustive);
     let patterns = generate_patterns(&rules, uses_eoi);
     let skip = generate_skip(&rules);
@@ -94,6 +97,7 @@ pub fn generate(
 
     quote! {
         #include_fix
+        #route_macros
         #rule_enum
         #parser_impl
     }
@@ -273,6 +277,35 @@ fn generate_enum(
     });
 
     result
+}
+fn generate_route_macros(routes: &[(String, Vec<String>)]) -> TokenStream {
+    if !routes.is_empty() {
+        let route_macro_ident = Ident::new("routes", Span::call_site());
+        let (root_rules, root_rules_items): (Vec<_>, Vec<_>) = routes
+            .into_iter()
+            .map(|(root, items)| {
+                (
+                    Ident::new(root, Span::call_site()),
+                    items
+                        .into_iter()
+                        .map(|item| Ident::new(item, Span::call_site()))
+                        .collect::<Vec<_>>(),
+                )
+            })
+            .unzip();
+        quote! {
+            macro_rules! #route_macro_ident {
+                #((#root_rules,$rule:ident,$($tokens:tt)*) => {
+                    match $rule {
+                        #(Rule::#root_rules_items => Some(super::#root_rules_items$($tokens)*),)*
+                        _  => None
+                    }
+                });*
+            }
+        }
+    } else {
+        quote! {}
+    }
 }
 
 fn generate_patterns(rules: &[OptimizedRule], uses_eoi: bool) -> TokenStream {

@@ -9,7 +9,7 @@ use syn::{parenthesized, LitStr};
 use super::core::{GrammarDataSource, GrammarNode};
 pub(super) use super::kw;
 
-pub(crate) struct GrammarPathSource(String);
+pub(crate) struct GrammarPathSource(pub String);
 impl GrammarDataSource for GrammarPathSource {
     fn emit<F>(self, handler: &mut F) -> syn::Result<()>
     where

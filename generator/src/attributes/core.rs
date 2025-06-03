@@ -1,21 +1,17 @@
 use proc_macro2::Span;
+use syn::{Ident, LitStr, Token};
 
 use crate::GrammarSource;
 
-use super::{
-    constructor::GrammarConstructorSource, inline::GrammarInlineSource, path::GrammarPathSource,
-};
+use super::{constructor::RuleDefinition, inline::GrammarInlineSource, path::GrammarPathSource};
 pub(super) mod kw {
     syn::custom_keyword!(path);
     syn::custom_keyword!(inline);
     syn::custom_keyword!(new);
     syn::custom_keyword!(or);
     syn::custom_keyword!(seq);
-    syn::custom_keyword!(optional);
-    syn::custom_keyword!(zeroOrMore);
-    syn::custom_keyword!(oneOrMore);
-    syn::custom_keyword!(repeat);
     syn::custom_keyword!(entry);
+    syn::custom_keyword!(route);
 }
 
 pub trait GrammarDataSource {
@@ -23,7 +19,7 @@ pub trait GrammarDataSource {
     where
         F: FnMut(GrammarNode) -> syn::Result<()>;
 }
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct GrammarNode {
     pub source: GrammarSource,
     pub root_rule: Option<String>,
@@ -31,7 +27,7 @@ pub(crate) struct GrammarNode {
 pub(crate) enum GrammarSourceEmitter {
     Path(GrammarPathSource),
     Inline(GrammarInlineSource),
-    Constructor(GrammarConstructorSource),
+    Definition(RuleDefinition),
 }
 
 impl GrammarDataSource for GrammarSourceEmitter {
@@ -42,7 +38,7 @@ impl GrammarDataSource for GrammarSourceEmitter {
         match self {
             GrammarSourceEmitter::Path(source) => source.emit(handler),
             GrammarSourceEmitter::Inline(source) => source.emit(handler),
-            GrammarSourceEmitter::Constructor(source) => source.emit(handler),
+            GrammarSourceEmitter::Definition(source) => source.emit(handler),
         }
     }
 }
@@ -53,13 +49,13 @@ impl syn::parse::Parse for GrammarSourceEmitter {
             Ok(GrammarSourceEmitter::Path(
                 input.parse::<GrammarPathSource>()?,
             ))
-        } else if input.peek(kw::inline) {
+        } else if input.peek(LitStr) {
             Ok(GrammarSourceEmitter::Inline(
                 input.parse::<GrammarInlineSource>()?,
             ))
-        } else if input.peek(kw::new) {
-            Ok(GrammarSourceEmitter::Constructor(
-                input.parse::<GrammarConstructorSource>()?,
+        } else if input.peek(Ident) && input.peek2(Token![=]) {
+            Ok(GrammarSourceEmitter::Definition(
+                input.parse::<RuleDefinition>()?,
             ))
         } else {
             Err(syn::Error::new(

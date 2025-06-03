@@ -15,10 +15,15 @@ use syn::{Attribute, DeriveInput, Expr, ExprLit, Generics, Ident, Lit, Meta};
 
 use crate::attributes::{GrammarDataSource, GrammarSourceEmitter};
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub(crate) enum GrammarSource {
     File(PathBuf),
     Inline(String),
+    RouteSet(Vec<String>),
+}
+pub(crate) struct GrammarInfo {
+    pub sources: Vec<GrammarSource>,
+    pub routes: Vec<(String, Vec<String>)>,
 }
 
 /// Parsed information of the derive and the attributes.
@@ -31,7 +36,7 @@ pub struct ParsedDerive {
     pub non_exhaustive: bool,
 }
 
-pub(crate) fn parse_derive(ast: DeriveInput) -> (ParsedDerive, Vec<GrammarSource>) {
+pub(crate) fn parse_derive(ast: DeriveInput) -> (ParsedDerive, GrammarInfo) {
     let name = ast.ident;
     let generics = ast.generics;
 
@@ -49,7 +54,8 @@ pub(crate) fn parse_derive(ast: DeriveInput) -> (ParsedDerive, Vec<GrammarSource
     }
 
     let mut grammar_sources = Vec::with_capacity(grammar.len());
-    parse_attributes(grammar, &mut grammar_sources);
+    let mut routes = Vec::new();
+    parse_attributes(grammar, &mut grammar_sources, &mut routes);
 
     let non_exhaustive = ast
         .attrs
@@ -62,10 +68,17 @@ pub(crate) fn parse_derive(ast: DeriveInput) -> (ParsedDerive, Vec<GrammarSource
             generics,
             non_exhaustive,
         },
-        grammar_sources,
+        GrammarInfo {
+            sources: grammar_sources,
+            routes: routes,
+        },
     )
 }
-fn parse_attributes(attrs: Vec<&Attribute>, output: &mut Vec<GrammarSource>) {
+fn parse_attributes(
+    attrs: Vec<&Attribute>,
+    grammars: &mut Vec<GrammarSource>,
+    routes: &mut Vec<(String, Vec<String>)>,
+) {
     for attr in attrs {
         match &attr.meta {
             Meta::List(meta) => {
@@ -73,7 +86,14 @@ fn parse_attributes(attrs: Vec<&Attribute>, output: &mut Vec<GrammarSource>) {
                     let source = meta.parse_args::<GrammarSourceEmitter>().unwrap();
                     source
                         .emit(&mut |node| {
-                            output.push(node.source);
+                            if let GrammarSource::RouteSet(node_routes) = node.source {
+                                if let Some(root_rule) = node.root_rule {
+                                    routes.push((root_rule, node_routes));
+                                }
+                            } else {
+                                grammars.push(node.source);
+                            }
+
                             Ok(())
                         })
                         .unwrap();
@@ -85,11 +105,11 @@ fn parse_attributes(attrs: Vec<&Attribute>, output: &mut Vec<GrammarSource>) {
                     ..
                 }) => {
                     if meta.path.is_ident("grammar") {
-                        output.push(GrammarSource::File(
+                        grammars.push(GrammarSource::File(
                             Path::new(&string.value()).to_path_buf(),
                         ));
                     } else {
-                        output.push(GrammarSource::Inline(string.value()))
+                        grammars.push(GrammarSource::Inline(string.value()))
                     }
                 }
                 _ => panic!("grammar attribute must be a string"),
@@ -103,6 +123,8 @@ fn parse_attributes(attrs: Vec<&Attribute>, output: &mut Vec<GrammarSource>) {
 mod tests {
     use std::path::Path;
 
+    use crate::GrammarInfo;
+
     use super::parse_derive;
     use super::GrammarSource;
 
@@ -114,8 +136,8 @@ mod tests {
             pub struct MyParser<'a, T>;
         ";
         let ast = syn::parse_str(definition).unwrap();
-        let (_, filenames) = parse_derive(ast);
-        assert_eq!(filenames, [GrammarSource::Inline("GRAMMAR".to_string())]);
+        let (_, info) = parse_derive(ast);
+        assert_eq!(info.sources, [GrammarSource::Inline("GRAMMAR".to_string())]);
     }
 
     #[test]
@@ -126,9 +148,9 @@ mod tests {
             pub struct MyParser<'a, T>;
         ";
         let ast = syn::parse_str(definition).unwrap();
-        let (parsed_derive, filenames) = parse_derive(ast);
+        let (parsed_derive, info) = parse_derive(ast);
         assert_eq!(
-            filenames,
+            info.sources,
             [GrammarSource::File(Path::new("myfile.pest").to_path_buf())]
         );
         assert!(!parsed_derive.non_exhaustive);
@@ -143,9 +165,9 @@ mod tests {
             pub struct MyParser<'a, T>;
         ";
         let ast = syn::parse_str(definition).unwrap();
-        let (_, filenames) = parse_derive(ast);
+        let (_, info) = parse_derive(ast);
         assert_eq!(
-            filenames,
+            info.sources,
             [
                 GrammarSource::File(Path::new("myfile1.pest").to_path_buf()),
                 GrammarSource::File(Path::new("myfile2.pest").to_path_buf())
@@ -161,9 +183,9 @@ mod tests {
             pub struct MyParser<'a, T>;
         ";
         let ast = syn::parse_str(definition).unwrap();
-        let (parsed_derive, filenames) = parse_derive(ast);
+        let (parsed_derive, info) = parse_derive(ast);
         assert_eq!(
-            filenames,
+            info.sources,
             [GrammarSource::File(Path::new("myfile.pest").to_path_buf())]
         );
         assert!(parsed_derive.non_exhaustive);
