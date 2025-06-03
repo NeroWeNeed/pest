@@ -478,7 +478,6 @@ impl GrammarDataSource for RuleDefinition {
                 root_rule: Some(self.name.to_string()),
             })?;
         }
-        println!("Out: {output}");
         handler(GrammarNode {
             source: crate::GrammarSource::Inline(output),
             root_rule: Some(self.name.to_string()),
